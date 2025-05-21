@@ -1,4 +1,5 @@
 from pyspark.shell import spark
+from pyspark.shell import spark
 from pyspark.sql import DataFrame
 
 from common import read_csv, view
@@ -36,67 +37,76 @@ def solve() -> DataFrame:
     view("player_result", player_result)
 
     # Сформируем таблицу соответствий игрок-матч-поражение, где true будет означать поражение
-    view("player_match_lose", """
+    # Дабы сохранить хронологию, и не перепутать в дальнейшем как мы считаем лузстрик вводим и дату окончания матча
+    view("player_match_loss", """
         select 
             player_result.player_id, 
             match.match_id,
-            not (player_result.is_radiant = match.radiant_won) as is_lose
+            case when player_result.is_radiant != match.radiant_won then 1 else 0 end as is_loss,
+            match.finished_at
         from
-            player_result 
+            player_result
         left join 
             match on match.match_id = player_result.match_id 
+        order by match.finished_at
     """)
 
-    # # not hard
-    # view("winrate", """
-    #     select
-    #         player_id,
-    #         int(100 * avg(cast(player_result.is_radiant = match.radiant_won as int))) as winrate,
-    #         count(player_id) as number_of_matches
-    #     from player_result 
-    #         left join match on match.match_id = player_result.match_id 
-    #     group by player_id 
-    # """)
+    # Здесь мы посчитаем оконной функцией суммирования поражения. Логика такая:
+    # Если у нас поражение - прибавляем 0, т.е. оставляем значение
+    # Если победа - прибавим единицу, выводя новую "группу" лузстрика.
+    # Уже на этом этапе мы получим кол-во лузстриков для каждого игрока (максимальное число группы)
+    # partition гарантирует, что группы лузстриков между игроками не пересекутся
+    view("player_loss_streak", """
+        select
+            player_id,
+            match_id,
+            is_loss,
+            sum(case when is_loss = 0 then 1 else 0 end)
+                over(partition by player_id order by finished_at) as loss_streak
+        from
+            player_match_loss
+    """)
 
-    # # still not hard but takes a while
-    # view("pos_cnt", """
-    #     select 
-    #         player_id, pos, count(pos) as pos_cnt
-    #     from player_result
-    #     group by player_id, pos
-    # """)
+    # Дальше мы сгруппируем по числовым группа лузстрика,
+    # подсчитав кол-во элементов в каждой группе. Группировка будет
+    # двойной, т.к. ещё необходимо подсчитать по каждому игроку
+    view("player_loss_length", """
+        select
+            player_id,
+            loss_streak,
+            count(*) as streak_length
+        from
+            player_loss_streak
+        WHERE
+            is_loss = 1
+        GROUP BY
+            player_id, loss_streak
+    """)
 
-    # view("max_pos_cnt", """
-    #     select 
-    #         player_id, 
-    #         pos, 
-    #         pos_cnt,
-    #         max(pos_cnt) over (partition by player_id) as max_pos_cnt
-    #     from pos_cnt
-    # """)
+    # Вычисляем среднюю длину лоустриков
+    view("player_avg_losestreak", """
+        select
+            player_id,
+            coalesce(avg(streak_length), 0) as avg_losestreak
+        from
+            player_loss_length
+        GROUP BY
+            player_id
+    """)
 
-    # view("pos", """
-    #     select 
-    #         player_id, 
-    #         min(pos) as pos 
-    #     from max_pos_cnt 
-    #     where max_pos_cnt = pos_cnt
-    #     group by player_id
-    # """)
+    # Добавляем имя игрока
+    view("result", """
+        select
+            p.player_id,
+            p.name,
+            ls.avg_losestreak
+        from
+            player_avg_losestreak ls
+        join
+            player p on ls.player_id = p.player_id
+    """)
 
-    # # aggregate and prettify
-    # view("res", """
-    #     select 
-    #         row_number() over (partition by 1 order by number_of_matches desc, name asc) AS N,
-    #         name,
-    #         pos.pos as pos,
-    #         concat(avg_kills, '/', avg_death, '/', avg_assists) as kda,
-    #         concat(avg_gold_k, 'k') as avg_gold,
-    #         concat(winrate.winrate, '%/', number_of_matches) as winrate
-    #     from player
-    #         join kda on kda.player_id = player.player_id
-    #         join winrate on winrate.player_id = player.player_id
-    #         join pos on pos.player_id = player.player_id
-    #     order by N
-    # """)
-    return spark.sql("select * from player_match_lose")
+    
+    # return spark.sql("select * from result order by avg_losestreak desc")
+    # Разблокировать для ручного теста
+    return spark.sql("select * from player_match_loss where player_id = 4")
