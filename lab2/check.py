@@ -3,7 +3,7 @@ from functools import reduce
 from assertpy import assert_that
 from pyspark.sql import functions as F
 
-from lab2.common import run_solution, list_solutions
+from common import run_solution, list_solutions
 
 
 def union_all(dfs):

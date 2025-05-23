@@ -1,1 +1,2 @@
-data_path = 'lab2/test_data'
+data_path = 'test_data'
+extension = '.ts'

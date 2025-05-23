@@ -6,11 +6,11 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.functions import udf, col
 from pyspark.sql.types import StringType
 
-from lab2.config import data_path
+from config import data_path
 
 
 def clear_solution_name(path: str) -> str:
-    return path.split('solution_')[1].split('.py')[0]
+    return path.split('/')[-1].split('.ts')[0]
 
 
 clear_solution_name_udf = udf(lambda path: clear_solution_name(path), StringType())
@@ -47,10 +47,6 @@ def list_solutions(path):
 def run_solution(name):
     spark = SparkSession.builder.master("local").getOrCreate()
     common = SparkContextCommon(spark)
-    module = importlib.import_module(f'lab2.solutions.{name}')
+    module = importlib.import_module(f'solutions.{name}')
     return getattr(module, 'solve')(common)
 
-
-def list_solutions(path):
-    files = [f for f in listdir(path) if isfile(join(path, f))]
-    return [f.replace('.py', '') for f in files if 'template' not in f]
